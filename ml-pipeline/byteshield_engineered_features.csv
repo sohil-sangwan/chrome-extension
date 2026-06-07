@@ -1,0 +1,9 @@
+url,label,url_length,dot_count,dash_count,is_https,is_ip_address,domain_entropy,is_risky_tld,subdomain_depth,contains_scam_keyword
+https://www.irctc.co.in/nget/train-search,0,41,3,1,1,0,1.92,0,1,1
+https://www.onlinesbi.sbi/portal/,0,33,2,0,1,0,2.73,0,1,1
+https://uidai.gov.in/en/my-aadhaar/about-your-aadhaar.html,0,58,3,3,1,0,1.92,0,0,0
+http://irctc-login-india-refund.xyz/irctc/,1,42,1,3,0,0,3.61,1,0,1
+http://sbi-kyc-verification-update-portal.tk/secure/,1,52,1,4,0,0,4.04,1,0,1
+https://aadhaar-kyc-verification-free.ml/login.php,1,50,2,3,1,0,3.66,1,0,1
+http://192.168.1.105/paytm-cashback-reward/claim.html,1,53,4,2,0,1,2.72,0,0,1
+https://amazon.co.in/dp/B07XVMDRZY,0,34,2,0,1,0,2.25,0,0,0
