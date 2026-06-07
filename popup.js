@@ -11,7 +11,7 @@ html
   </style>
 </head>
 <body>
-  <h2>🛡️ PhishGuard</h2>
+  <h2>🛡️ Byteshield</h2>
   <div class="status-box" id="status">Status: Initializing...</div>
   <button id="scan-btn">Scan Current Page</button>
 
