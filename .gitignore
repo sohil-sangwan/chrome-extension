@@ -1,2 +1,10 @@
 *.csv
 __pycache__/
+
+# Chrome/Extension Local Cache Tracking
+.chrome/
+*.log
+
+# Operating System Trash Files
+.DS_Store
+Thumbs.db
