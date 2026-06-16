@@ -121,3 +121,47 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         }
     }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Memory cache holding prediction data for active browsing channels
+const predictionCache = {};
+
+// Mock function representing where Developer B pipes the final ONNX engine output
+function storePredictionResult(tabId, predictionVerdict, featureMetrics) {
+  predictionCache[tabId] = {
+    prediction: predictionVerdict, // 0 = Safe, 1 = Phishing
+    metrics: featureMetrics,       // { urlLength, dotCount, isHttps }
+    timestamp: Date.now()
+  };
+}
+
+// Global Manifest V3 runtime message router
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === "GET_LATEST_PREDICTION") {
+    const data = predictionCache[message.tabId] || null;
+    sendResponse({ data: data });
+  }
+  // Return true to keep the message channel open for asynchronous responses
+  return true;
+});
+
+// Clean up memory cache allocation when a browser tab closes
+chrome.tabs.onRemoved.addListener((tabId) => {
+  if (predictionCache[tabId]) {
+    delete predictionCache[tabId];
+  }
+});
