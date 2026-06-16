@@ -21,7 +21,8 @@
     {
       "resources": [
         "*.wasm",
-        "*.mjs"
+        "*.mjs",
+        "warning.html"
       ],
       "matches": ["<all_urls>"]
     }
