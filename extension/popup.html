@@ -1,34 +1,78 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ByteShield Phishing Detector</title>
   <style>
-    body { width: 300px; font-family: 'Segoe UI', Arial, sans-serif; padding: 15px; margin: 0; background: #fafafa; }
-    h2 { color: #1e3a8a; margin-top: 0; display: flex; align-items: center; gap: 8px; }
-    .status-box { padding: 12px; border-radius: 6px; background: #e2e8f0; font-weight: 600; margin-bottom: 12px; border: 1px solid #cbd5e1; font-size: 14px; text-align: center; }
-    button { width: 100%; padding: 10px; background: #2563eb; color: white; border: none; border-radius: 6px; font-weight: bold; cursor: pointer; }
+    body {
+      width: 320px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background-color: #f8f9fa;
+      color: #333;
+    }
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      text-align: center;
+    }
+    .status-banner {
+      padding: 12px;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 1.1rem;
+      margin-bottom: 16px;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+    /* Dynamic Status Styles */
+    .status-loading { background-color: #e9ecef; color: #495057; }
+    .status-safe { background-color: #d1e7dd; color: #0f5132; }
+    .status-phishing { background-color: #f8d7da; color: #842029; }
+    
+    .metrics-header {
+      text-align: left;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin: 12px 0 8px 0;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid #eee;
+      font-size: 0.9rem;
+    }
+    .metric-row:last-child { border-bottom: none; }
+    .metric-value { font-weight: 600; color: #212529; }
   </style>
 </head>
 <body>
-  <h2>🛡️ ByteShield</h2>
-  <div class="status-box" id="status">Engine Status: Guarding Pages</div>
-  <button id="scan-btn">Scan Active Tab</button>
-
-  <script style="display:none">
-    document.getElementById('scan-btn').addEventListener('click', async () => {
-      const statusDiv = document.getElementById('status');
-      statusDiv.innerHTML = "Processing metrics...";
-      statusDiv.style.background = "#fef3c7";
-      statusDiv.style.borderColor = "#f59e0b";
-      
-      let [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      
-      setTimeout(() => {
-        statusDiv.innerHTML = "Active Ecosystem Scan Safe";
-        statusDiv.style.background = "#dcfce7";
-        statusDiv.style.borderColor = "#22c55e";
-        alert(`ByteShield scan verified for domain location: ${tab.url}`);
-      }, 500);
-    });
-  </script>
+  <div class="card">
+    <div id="statusBanner" class="status-banner status-loading">Analyzing Page...</div>
+    
+    <div class="metrics-header">Extracted Matrix Metrics</div>
+    <div id="metricsContainer">
+      <div class="metric-row">
+        <span>URL Length:</span>
+        <span id="metricUrlLength" class="metric-value">-</span>
+      </div>
+      <div class="metric-row">
+        <span>Dot Count:</span>
+        <span id="metricDotCount" class="metric-value">-</span>
+      </div>
+      <div class="metric-row">
+        <span>HTTPS Status:</span>
+        <span id="metricHttps" class="metric-value">-</span>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
 </body>
 </html>
