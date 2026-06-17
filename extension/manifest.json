@@ -1,12 +1,16 @@
 {
   "manifest_version": 3,
   "name": "ByteShield",
-  "version": "1.6",
-  "description": "Real-Time ML Phishing Detector",
+  "version": "2.0",
+  "description": "Real-Time Edge ML Phishing Detector - Active Intercept Protection",
   "permissions": [
     "activeTab",
     "tabs",
-    "offscreen"
+    "offscreen",
+    "webNavigation"
+  ],
+  "host_permissions": [
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
