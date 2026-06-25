@@ -10,9 +10,15 @@ const ALPHABETICAL_FEATURES = [
     "url_length"             // 6. Absolute character lengths
 ];
 
-// Initialize the local ONNX engine within the unrestricted DOM environment
+
 async function getModelSession() {
     if (estimationSession) return estimationSession;
+
+    // Failsafe: if the WASM libraries or ONNX loader failed to inject dynamically
+    if (typeof ort === 'undefined') {
+        console.warn("[!] ONNX runtime library 'ort' is not defined. Active fallback mode enabled.");
+        return null;
+    }
 
     try {
         ort.env.wasm.wasmPaths = {
@@ -23,104 +29,108 @@ async function getModelSession() {
             'ort-wasm-simd-threaded.jsep.wasm': chrome.runtime.getURL('ort-wasm-simd-threaded.jsep.wasm')
         };
 
-        console.log("[*] Offscreen compiling WebAssembly engine binary...");
         estimationSession = await ort.InferenceSession.create(
             chrome.runtime.getURL('byteshield_model.onnx'),
             { executionProviders: ['wasm'] }
         );
-        console.log("[+] Offscreen ONNX structural weights loaded successfully.");
         return estimationSession;
     } catch (err) {
-        console.error("[-] Offscreen model initialization failed:", err);
+        console.error("[-] Offscreen model compilation failed, relying on fallback parameters:", err);
         return null;
     }
 }
 
-// Pre-warm the WebAssembly model immediately when the offscreen document boots up
+// Pre-warm WebAssembly structures on document boot
 getModelSession();
 
-// Listen for processing orders sent from background.js
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action !== "RUN_INFERENCE") return false;
 
-    const { url, features } = message.payload;
-    if (!features) {
-        sendResponse({ prediction: 0, metrics: null, status: "error" });
+    // Wrap the entire parsing loop in a try/catch to ensure we call sendResponse under any circumstance
+    try {
+        const { url, features } = message.payload || {};
+        if (!features) {
+            sendResponse({ prediction: 0, metrics: null, status: "error", error: "Missing features matrix" });
+            return false;
+        }
+
+        // Execute asynchronous calculations without hanging the message passing bridge
+        runInferenceChain(url, features)
+            .then((result) => sendResponse(result))
+            .catch((err) => {
+                console.error("[-] Async prediction calculation rejected:", err);
+                sendResponse({ prediction: 0, metrics: null, status: "error", error: err.message });
+            });
+
+        return true; // Keep the runtime messaging channel open for the asynchronous handler
+    } catch (err) {
+        console.error("[-] Synchronous crash inside offscreen intercept handler:", err);
+        sendResponse({ prediction: 0, metrics: null, status: "error", error: err.message });
         return false;
     }
-
-    (async () => {
-        try {
-            // Ensure session is active
-            const session = await getModelSession();
-            let prediction = 0;
-            let inferenceSuccess = false;
-
-            // 1. Arrange the features in strict alphabetical index order
-            const sortedArray = ALPHABETICAL_FEATURES.map(key => {
-                const val = features[key];
-                return val !== undefined ? parseFloat(val) : 0.0;
-            });
-
-            console.log(`[*] Calibrated alphabetical feature vector: [${sortedArray.join(", ")}]`);
-
-            if (session) {
-                // 2. Wrap inputs into an ONNX tensor representing a single evaluation record (1 x N)
-                const inputTensor = new ort.Tensor("float32", Float32Array.from(sortedArray), [1, sortedArray.length]);
-                
-                // 3. Run model calculation
-                const feeds = { [session.inputNames[0]]: inputTensor };
-                const results = await session.run(feeds);
-
-                // 4. Read class labels outputs
-                const labelOutput = results[session.outputNames[0]];
-                if (labelOutput && labelOutput.data) {
-                    prediction = Number(labelOutput.data[0]);
-                    inferenceSuccess = true;
-                    console.log(`[+] ONNX model prediction completed. Output: ${prediction}`);
-                }
-            }
-
-            // ====================================================================
-            // DETECT MOCK MODEL & ENFORCE MATHEMATICAL DECISION BOUNDARY FALLBACK
-            // Ensures our defense remains robust if model files fail or load slowly
-            // ====================================================================
-            if (!inferenceSuccess || prediction === 1) {
-                const scamWord = features["contains_scam_keyword"] ?? 0;
-                const riskyTld = features["is_risky_tld"] ?? 0;
-                const urlLen = features["url_length"] ?? 0;
-                const dotCount = features["dot_count"] ?? 0;
-                const isHttps = features["is_https"] ?? 1;
-
-                if (scamWord === 1 || riskyTld === 1) {
-                    prediction = 1; // Mark as Phishing
-                } else if (urlLen < 40 && dotCount <= 3 && isHttps === 1) {
-                    prediction = 0; // Standardize as Safe
-                } else if (dotCount > 4 || urlLen > 75) {
-                    prediction = 1; // Mark as Phishing due to excessive structure complexity
-                }
-            }
-            // ====================================================================
-
-            // Map standard keys back to display formats for popup.js and cache matching
-            const uiMetrics = {
-                urlLength: features["url_length"] ?? url.length,
-                dotCount: features["dot_count"] ?? 0,
-                isHttps: (features["is_https"] ?? 1) === 1
-            };
-
-            // Return calculated prediction and indicators to background.js
-            sendResponse({
-                prediction: prediction,
-                metrics: uiMetrics,
-                status: "success"
-            });
-
-        } catch (err) {
-            console.error("[-] Offscreen runtime execution exception:", err);
-            sendResponse({ prediction: 0, metrics: null, status: "error" });
-        }
-    })();
-
-    return true; // Keep the runtime message channel open for the async response
 });
+
+// Performs ML inference or executes local decision boundaries securely
+async function runInferenceChain(url, features) {
+    let prediction = 0;
+    let inferenceSuccess = false;
+
+    // 1. Arrange the features in strict alphabetical index order
+    const sortedArray = ALPHABETICAL_FEATURES.map(key => {
+        const val = features[key];
+        return val !== undefined ? parseFloat(val) : 0.0;
+    });
+
+    try {
+        const session = await getModelSession();
+        if (session && typeof ort !== 'undefined') {
+            // 2. Feed float32 values into a 1D evaluation tensor array (1 x N)
+            const inputTensor = new ort.Tensor("float32", Float32Array.from(sortedArray), [1, sortedArray.length]);
+            const feeds = { [session.inputNames[0]]: inputTensor };
+            
+            // 3. Execute ONNX Runtime engine
+            const results = await session.run(feeds);
+            const labelOutput = results[session.outputNames[0]];
+            
+            if (labelOutput && labelOutput.data) {
+                prediction = Number(labelOutput.data[0]);
+                inferenceSuccess = true;
+            }
+        }
+    } catch (err) {
+        console.error("[-] Fallback triggered. Machine Learning inference crashed:", err);
+    }
+
+    // ====================================================================
+    // ROBUST FALLBACK BOUNDARY
+    // Executed immediately if ort.js is blocked, uncompiled, or fails to resolve
+    // ====================================================================
+    if (!inferenceSuccess) {
+        const scamWord = features["contains_scam_keyword"] ?? 0;
+        const riskyTld = features["is_risky_tld"] ?? 0;
+        const urlLen = features["url_length"] ?? 0;
+        const dotCount = features["dot_count"] ?? 0;
+        const isHttps = features["is_https"] ?? 1;
+
+        if (scamWord === 1 || riskyTld === 1) {
+            prediction = 1; // Classify as Phishing
+        } else if (urlLen < 40 && dotCount <= 3 && isHttps === 1) {
+            prediction = 0; // Classify as Safe
+        } else if (dotCount > 4 || urlLen > 75) {
+            prediction = 1; // Classify as Phishing (excessive length/structural clutter)
+        }
+    }
+
+    const uiMetrics = {
+        urlLength: features["url_length"] ?? url.length,
+        dotCount: features["dot_count"] ?? 0,
+        isHttps: (features["is_https"] ?? 1) === 1
+    };
+
+    return {
+        prediction: prediction,
+        metrics: uiMetrics,
+        status: "success"
+    };
+}
