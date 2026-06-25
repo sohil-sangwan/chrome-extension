@@ -10,7 +10,6 @@ const ALPHABETICAL_FEATURES = [
     "url_length"             // 6. Absolute character lengths
 ];
 
-
 async function getModelSession() {
     if (estimationSession) return estimationSession;
 
@@ -42,7 +41,6 @@ async function getModelSession() {
 
 // Pre-warm WebAssembly structures on document boot
 getModelSession();
-
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action !== "RUN_INFERENCE") return false;
@@ -113,12 +111,12 @@ async function runInferenceChain(url, features) {
         const dotCount = features["dot_count"] ?? 0;
         const isHttps = features["is_https"] ?? 1;
 
-        if (scamWord === 1 || riskyTld === 1) {
+        // CRUCIAL FIX: Default to safe unless explicit scam keyword/risky TLD metrics match, 
+        // preventing safe medium-length domains (like sarkariresult) from triggering blocks.
+        if (scamWord === 1 || riskyTld === 1 || dotCount > 4 || urlLen > 75) {
             prediction = 1; // Classify as Phishing
-        } else if (urlLen < 40 && dotCount <= 3 && isHttps === 1) {
+        } else {
             prediction = 0; // Classify as Safe
-        } else if (dotCount > 4 || urlLen > 75) {
-            prediction = 1; // Classify as Phishing (excessive length/structural clutter)
         }
     }
 
