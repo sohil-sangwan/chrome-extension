@@ -51,7 +51,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     (async () => {
         try {
-            // Ensure session is initialized
+            // Ensure session is active
             const session = await getModelSession();
             let prediction = 0;
             let inferenceSuccess = false;
