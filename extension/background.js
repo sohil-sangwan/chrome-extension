@@ -1,4 +1,4 @@
-// Function to safely create or find the hidden AI window
+// Function to safely create or find the hidden AI window context
 async function setupOffscreenEngine() {
     const existingContexts = await chrome.runtime.getContexts({
         contextTypes: ['OFFSCREEN_DOCUMENT']
@@ -36,83 +36,103 @@ function calculateEntropy(text) {
 
 function extractDomainName(urlString) {
     try {
-        const urlObj = new URL(urlString);
-        let hostname = urlObj.hostname;
-        // Strip www. if present
-        if (hostname.startsWith("www.")) {
-            hostname = hostname.substring(4);
-        }
-        // Extract primary domain segment before the TLD suffix
-        const parts = hostname.split('.');
-        if (parts.length >= 2) {
-            return parts[parts.length - 2];
-        }
-        return hostname;
-    } catch (e) {
+        const parsed = new URL(urlString);
+        return parsed.hostname;
+    } catch {
         return "";
     }
 }
 
-function extractTldSuffix(urlString) {
-    try {
-        const urlObj = new URL(urlString);
-        const parts = urlObj.hostname.split('.');
-        if (parts.length > 1) {
-            return parts[parts.length - 1];
-        }
-        return "";
-    } catch (e) {
-        return "";
-    }
+function extractDomainExtension(domain) {
+    const parts = domain.split('.');
+    return parts.length > 1 ? `.${parts[parts.length - 1]}` : "";
 }
 
-// Synchronous tab updates event listener registration
+function extractFeatures(url) {
+    const domain = extractDomainName(url);
+    const ext = extractDomainExtension(domain);
+    
+    const features = {};
+    features['url_length'] = url.length;
+    features['dot_count'] = (url.match(/\./g) || []).length;
+    features['is_https'] = url.startsWith('https://') ? 1 : 0;
+    features['domain_entropy'] = calculateEntropy(domain);
+    
+    const riskyTlds = ['.tk', '.ml', '.ga', '.cf', '.gq', '.top', '.cc', '.xyz', '.live', '.click'];
+    features['is_risky_tld'] = riskyTlds.includes(ext) ? 1 : 0;
+    
+    const scamKeywords = ['kyc', 'verification', 'blocked', 'refund', 'login', 'paytm', 'irctc', 'sbi', 'secure', 'claim', 'cashback', 'allegrolokalnie', 'oferta', 'free'];
+    features['contains_scam_keyword'] = scamKeywords.some(kw => url.toLowerCase().includes(kw)) ? 1 : 0;
+    
+    return features;
+}
+
+// Memory cache holding prediction data for active browsing channels
+const predictionCache = {};
+
+// Helper to store predictions in cache so popup.js can fetch them
+function storePredictionResult(tabId, predictionVerdict, featureMetrics) {
+    predictionCache[tabId] = {
+        prediction: predictionVerdict, // 0 = Safe, 1 = Phishing
+        metrics: featureMetrics,       // { urlLength, dotCount, isHttps }
+        timestamp: Date.now()
+    };
+    console.log(`[+] Cached prediction for tab ${tabId}:`, predictionCache[tabId]);
+}
+
+// Redirects a suspicious navigation to our local safety block page
+function handlePhishingVerdict(tabId, maliciousUrl) {
+    const warningPageUrl = chrome.runtime.getURL(`warning.html`) + `?url=${encodeURIComponent(maliciousUrl)}`;
+    chrome.tabs.update(tabId, { url: warningPageUrl });
+    console.log(`[⚠️] Intercepted phishing navigation on tab ${tabId}. Redirecting to safety screen.`);
+}
+
+// =====================================================================
+// REAL-TIME TRAFFIC ROUTING LOOP
+// =====================================================================
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
-    if (changeInfo.status === 'complete' && tab.url && !tab.url.startsWith('chrome://')) {
-        console.log(`[*] Running real-time evaluation loop for: ${tab.url}`);
-        
+    // Only execute when the tab starts loading a standard web address
+    if (changeInfo.status === 'loading' && tab.url && tab.url.startsWith('http')) {
+        // Avoid intercepting our own warning page to prevent infinite redirects
+        if (tab.url.includes(chrome.runtime.id) && tab.url.includes('warning.html')) {
+            return;
+        }
+
         try {
+            // 1. Ensure the Offscreen DOM Document is awake and initialized
             await setupOffscreenEngine();
 
-            const urlString = tab.url;
-            const cleanUrlLower = urlString.toLowerCase();
-            const domainName = extractDomainName(urlString);
-            const tldSuffix = extractTldSuffix(urlString);
+            // 2. Extract Javascript features from the current URL
+            const extractedFeatures = extractFeatures(tab.url);
 
-            // 1. Calculate features exactly like the Python pipeline
-            const urlLength = parseFloat(urlString.length);
-            const dotCount = parseFloat((urlString.match(/\./g) || []).length);
-            const isHttps = urlString.startsWith('https://') ? 1.0 : 0.0;
-            const domainEntropy = calculateEntropy(domainName);
-            
-            const riskyTlds = ['xyz', 'tk', 'ml', 'cf', 'gq', 'top', 'cc'];
-            const isRiskyTld = riskyTlds.includes(tldSuffix) ? 1.0 : 0.0;
-            
-            const scamKeywords = ['kyc', 'verification', 'blocked', 'refund', 'login', 'paytm', 'irctc', 'sbi'];
-            const containsScamKeyword = scamKeywords.some(kw => cleanUrlLower.includes(kw)) ? 1.0 : 0.0;
-
-            // 2. CRITICAL: Arrange array in exact alphabetical matrix order expected by your ONNX graph
-            const liveInputFeatures = [
-                containsScamKeyword,  // Feature 1
-                domainEntropy,         // Feature 2
-                dotCount,              // Feature 3
-                isHttps,               // Feature 4
-                isRiskyTld,            // Feature 5
-                urlLength              // Feature 6
-            ];
-            
-            console.log(`[*] Calculated Matrix: [Keywords: ${containsScamKeyword}, Entropy: ${domainEntropy}, Dots: ${dotCount}, HTTPS: ${isHttps}, RiskyTLD: ${isRiskyTld}, Len: ${urlLength}]`);
-
-            // Pass the verified matrix to the hidden AI engine
+            // 3. Dispatch the payload to the offscreen worker for execution
             chrome.runtime.sendMessage({
-                target: 'offscreen-ai',
-                data: liveInputFeatures
-            }, (prediction) => {
-                if (chrome.runtime.lastError) return;
+                action: "RUN_INFERENCE",
+                payload: {
+                    url: tab.url,
+                    features: extractedFeatures
+                }
+            }, (response) => {
+                if (chrome.runtime.lastError) {
+                    console.error("[-] Message sending failed:", chrome.runtime.lastError);
+                    return;
+                }
                 
-                if (prediction !== undefined) {
-                    console.log(`[+] Prediction Output Matrix: ${prediction}`);
+                if (response && response.status === "success") {
+                    const { prediction, metrics } = response;
+                    
+                    console.log(`[+] Prediction Output Score: ${prediction}`);
                     console.log(`[+] ByteShield Status: ${prediction === 1 ? "⚠️ PHISHING" : "✅ SAFE"}`);
+                    
+                    // CRUCIAL FIX: Store results inside the memory cache so popup.js can access it
+                    storePredictionResult(tabId, prediction, metrics);
+                    
+                    // Active Intercept Safety Block
+                    if (prediction === 1) {
+                        handlePhishingVerdict(tabId, tab.url);
+                    }
+                } else {
+                    console.error("[-] Offscreen engine returned an invalid response schema.");
                 }
             });
 
@@ -122,46 +142,18 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-// Memory cache holding prediction data for active browsing channels
-const predictionCache = {};
-
-// Mock function representing where Developer B pipes the final ONNX engine output
-function storePredictionResult(tabId, predictionVerdict, featureMetrics) {
-  predictionCache[tabId] = {
-    prediction: predictionVerdict, // 0 = Safe, 1 = Phishing
-    metrics: featureMetrics,       // { urlLength, dotCount, isHttps }
-    timestamp: Date.now()
-  };
-}
-
-// Global Manifest V3 runtime message router
+// Global Manifest V3 runtime message router for Popups
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === "GET_LATEST_PREDICTION") {
-    const data = predictionCache[message.tabId] || null;
-    sendResponse({ data: data });
-  }
-  // Return true to keep the message channel open for asynchronous responses
-  return true;
+    if (message.action === "GET_LATEST_PREDICTION") {
+        const data = predictionCache[message.tabId] || null;
+        sendResponse({ data: data });
+    }
+    return true; // Keep message channel open for async handlers
 });
 
-// Clean up memory cache allocation when a browser tab closes
+// Clean up tab memory allocations when a user closes a browsing container
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (predictionCache[tabId]) {
-    delete predictionCache[tabId];
-  }
+    if (predictionCache[tabId]) {
+        delete predictionCache[tabId];
+    }
 });
