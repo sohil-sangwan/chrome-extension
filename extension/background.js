@@ -4,9 +4,37 @@ let creatingOffscreen = null;
 // Global memory cache storing prediction outputs mapped to active browser tabs
 const predictionCache = {};
 
+// High-Authority Local Whitelist to prevent false-positives on safe domains
+const SAFE_WHITELIST = [
+    "google.com",
+    "sarkariresult.com",
+    "wikipedia.org",
+    "github.com",
+    "microsoft.com",
+    "apple.com",
+    "amazon.com",
+    "youtube.com",
+    "facebook.com",
+    "twitter.com",
+    "linkedin.com",
+    "yahoo.com",
+    "netflix.com"
+];
+
+// Checks if a URL belongs to a high-authority whitelisted domain
+function isWhitelisted(urlStr) {
+    try {
+        const parsed = new URL(urlStr);
+        const hostname = parsed.hostname.toLowerCase();
+        const cleanHost = hostname.startsWith("www.") ? hostname.substring(4) : hostname;
+        return SAFE_WHITELIST.some(domain => cleanHost === domain || cleanHost.endsWith("." + domain));
+    } catch {
+        return false;
+    }
+}
+
 // Function to safely create or find the hidden AI window context
 async function setupOffscreenEngine() {
-    // If a creation request is already active, wait for it to complete
     if (creatingOffscreen) {
         await creatingOffscreen;
         return;
@@ -19,7 +47,6 @@ async function setupOffscreenEngine() {
 
         if (existingContexts.length > 0) return;
 
-        // Register the creation promise to block concurrent races
         creatingOffscreen = chrome.offscreen.createDocument({
             url: 'offscreen.html',
             reasons: ['WORKERS'], // Informs Chrome we are compiling worker matrices
@@ -39,7 +66,9 @@ async function setupOffscreenEngine() {
     }
 }
 
-
+// =====================================================================
+// NATIVE JAVASCRIPT FEATURE ENGINEERING LAYER (Mirrors Python Code)
+// =====================================================================
 function calculateEntropy(text) {
     if (!text) return 0;
     const len = text.length;
@@ -104,7 +133,6 @@ function handlePhishingVerdict(tabId, maliciousUrl) {
     console.log(`[⚠️] Intercepted phishing navigation on tab ${tabId}. Redirecting to safety screen.`);
 }
 
-
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     // Only execute when the tab starts loading a standard web address
     if (changeInfo.status === 'loading' && tab.url && tab.url.startsWith('http')) {
@@ -114,6 +142,18 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
         }
 
         console.log(`[*] Running real-time evaluation loop for: ${tab.url}`);
+
+        // OPTIMIZATION: Instantly whitelist safe authority domains without executing model analysis
+        if (isWhitelisted(tab.url)) {
+            console.log(`[✅] High-Authority whitelist hit. Instantly whitelisting: ${tab.url}`);
+            const defaultMetrics = {
+                urlLength: tab.url.length,
+                dotCount: (tab.url.match(/\./g) || []).length,
+                isHttps: tab.url.startsWith('https://')
+            };
+            storePredictionResult(tabId, 0, defaultMetrics);
+            return;
+        }
 
         try {
             // 1. Ensure the Offscreen DOM Document is awake and initialized safely
