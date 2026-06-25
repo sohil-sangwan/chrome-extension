@@ -1,23 +1,45 @@
+// Lock promise to prevent concurrent offscreen document creation race conditions
+let creatingOffscreen = null;
+
+// Global memory cache storing prediction outputs mapped to active browser tabs
+const predictionCache = {};
+
 // Function to safely create or find the hidden AI window context
 async function setupOffscreenEngine() {
-    const existingContexts = await chrome.runtime.getContexts({
-        contextTypes: ['OFFSCREEN_DOCUMENT']
-    });
+    // If a creation request is already active, wait for it to complete
+    if (creatingOffscreen) {
+        await creatingOffscreen;
+        return;
+    }
 
-    if (existingContexts.length > 0) return;
+    try {
+        const existingContexts = await chrome.runtime.getContexts({
+            contextTypes: ['OFFSCREEN_DOCUMENT']
+        });
 
-    // Open our hidden HTML math engine room natively
-    await chrome.offscreen.createDocument({
-        url: 'offscreen.html',
-        reasons: ['WORKERS'], // Informs Chrome we are handling worker matrices
-        justification: 'Executing local ONNX machine learning model inference.'
-    });
-    console.log("[+] Secure Offscreen AI Engine Room Initialized.");
+        if (existingContexts.length > 0) return;
+
+        // Register the creation promise to block concurrent races
+        creatingOffscreen = chrome.offscreen.createDocument({
+            url: 'offscreen.html',
+            reasons: ['WORKERS'], // Informs Chrome we are compiling worker matrices
+            justification: 'Executing local ONNX machine learning model inference.'
+        });
+
+        await creatingOffscreen;
+        console.log("[+] Secure Offscreen AI Engine Room Initialized.");
+    } catch (err) {
+        if (err.message && err.message.includes("Only a single offscreen document")) {
+            console.log("[*] Offscreen document already initialized concurrently.");
+        } else {
+            console.error("[-] Offscreen document creation failed:", err);
+        }
+    } finally {
+        creatingOffscreen = null;
+    }
 }
 
-// =====================================================================
-// NATIVE JAVASCRIPT FEATURE ENGINEERING LAYER (Mirrors Python Code)
-// =====================================================================
+
 function calculateEntropy(text) {
     if (!text) return 0;
     const len = text.length;
@@ -67,29 +89,22 @@ function extractFeatures(url) {
     return features;
 }
 
-// Memory cache holding prediction data for active browsing channels
-const predictionCache = {};
-
-// Helper to store predictions in cache so popup.js can fetch them
 function storePredictionResult(tabId, predictionVerdict, featureMetrics) {
     predictionCache[tabId] = {
         prediction: predictionVerdict, // 0 = Safe, 1 = Phishing
         metrics: featureMetrics,       // { urlLength, dotCount, isHttps }
         timestamp: Date.now()
     };
-    console.log(`[+] Cached prediction for tab ${tabId}:`, predictionCache[tabId]);
+    console.log(`[+] Prediction Cached for tab ${tabId}:`, predictionCache[tabId]);
 }
 
-// Redirects a suspicious navigation to our local safety block page
 function handlePhishingVerdict(tabId, maliciousUrl) {
     const warningPageUrl = chrome.runtime.getURL(`warning.html`) + `?url=${encodeURIComponent(maliciousUrl)}`;
     chrome.tabs.update(tabId, { url: warningPageUrl });
     console.log(`[⚠️] Intercepted phishing navigation on tab ${tabId}. Redirecting to safety screen.`);
 }
 
-// =====================================================================
-// REAL-TIME TRAFFIC ROUTING LOOP
-// =====================================================================
+
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     // Only execute when the tab starts loading a standard web address
     if (changeInfo.status === 'loading' && tab.url && tab.url.startsWith('http')) {
@@ -98,12 +113,15 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
             return;
         }
 
+        console.log(`[*] Running real-time evaluation loop for: ${tab.url}`);
+
         try {
-            // 1. Ensure the Offscreen DOM Document is awake and initialized
+            // 1. Ensure the Offscreen DOM Document is awake and initialized safely
             await setupOffscreenEngine();
 
             // 2. Extract Javascript features from the current URL
             const extractedFeatures = extractFeatures(tab.url);
+            console.log(`[*] Calculated Matrix: [Keywords: ${extractedFeatures.contains_scam_keyword}, Entropy: ${extractedFeatures.domain_entropy}, Dots: ${extractedFeatures.dot_count}, HTTPS: ${extractedFeatures.is_https}, RiskyTLD: ${extractedFeatures.is_risky_tld}, Len: ${extractedFeatures.url_length}]`);
 
             // 3. Dispatch the payload to the offscreen worker for execution
             chrome.runtime.sendMessage({
@@ -114,7 +132,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
                 }
             }, (response) => {
                 if (chrome.runtime.lastError) {
-                    console.error("[-] Message sending failed:", chrome.runtime.lastError);
+                    console.error("[-] Message sending failed or timed out:", chrome.runtime.lastError);
                     return;
                 }
                 
@@ -122,17 +140,15 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
                     const { prediction, metrics } = response;
                     
                     console.log(`[+] Prediction Output Score: ${prediction}`);
-                    console.log(`[+] ByteShield Status: ${prediction === 1 ? "⚠️ PHISHING" : "✅ SAFE"}`);
+                    console.log(`[+] ByteShield Status: ${prediction === 1 ? "⚠️ PHISHING/UNSAFE" : "✅ SAFE"}`);
                     
-                    // CRUCIAL FIX: Store results inside the memory cache so popup.js can access it
                     storePredictionResult(tabId, prediction, metrics);
                     
-                    // Active Intercept Safety Block
                     if (prediction === 1) {
                         handlePhishingVerdict(tabId, tab.url);
                     }
                 } else {
-                    console.error("[-] Offscreen engine returned an invalid response schema.");
+                    console.error("[-] Offscreen engine returned an invalid/failed response schema:", response);
                 }
             });
 
@@ -142,16 +158,14 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
 });
 
-// Global Manifest V3 runtime message router for Popups
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "GET_LATEST_PREDICTION") {
         const data = predictionCache[message.tabId] || null;
         sendResponse({ data: data });
     }
-    return true; // Keep message channel open for async handlers
+    return true; 
 });
 
-// Clean up tab memory allocations when a user closes a browsing container
 chrome.tabs.onRemoved.addListener((tabId) => {
     if (predictionCache[tabId]) {
         delete predictionCache[tabId];
