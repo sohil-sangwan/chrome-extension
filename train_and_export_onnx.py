@@ -25,7 +25,6 @@ if missing_libs:
     print("=" * 80)
     print("[-] MISSING DEPENDENCIES DETECTED!")
     print("Please install the required Python packages before running this training script:")
-    print(f"👉 pip install {' '.join(missing_libs)}")
     print("=" * 80)
     sys.exit(1)
 
@@ -113,7 +112,7 @@ def load_or_generate_dataset(script_dir, num_samples=10000):
     phish_path = os.path.join(script_dir, "byteshield_master_training_set.csv")
     
     if os.path.exists(phish_path):
-        print(f"[+] Local master dataset detected. Loading from:\n    👉 {phish_path}")
+        print(f"[+] Local master dataset detected. Loading from:\n    {phish_path}")
         df = pd.read_csv(phish_path)
         expected_cols = ["contains_scam_keyword", "domain_entropy", "dot_count", "is_https", "is_risky_tld", "url_length", "label"]
         if all(col in df.columns for col in expected_cols):
@@ -186,7 +185,7 @@ def load_or_generate_dataset(script_dir, num_samples=10000):
     df_master = df_features.copy()
     df_master["label"] = df_labels
     df_master.to_csv(phish_path, index=False)
-    print(f"[+] Master training set cached locally at:\n     {phish_path}")
+    print(f"[+] Master training set cached locally at:\n    👉 {phish_path}")
 
     return df_features, df_labels
 
@@ -254,6 +253,7 @@ def main():
     f32_size = os.path.getsize(float32_filename) / 1024
     print(f"[+] Float32 model exported successfully!")
    
+
     # =====================================================================
     # QUANTIZATION PROCESSOR (With Safe Fail-safe Boundary Handling)
     # =====================================================================

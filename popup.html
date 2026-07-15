@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ByteShield Phishing Detector</title>
+  <style>
+    body {
+      width: 320px;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      margin: 0;
+      padding: 16px;
+      background-color: #f8f9fa;
+      color: #333;
+    }
+    .card {
+      background: #fff;
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+      text-align: center;
+    }
+    .status-banner {
+      padding: 12px;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 1.1rem;
+      margin-bottom: 16px;
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+    /* Dynamic Status Styles */
+    .status-loading { background-color: #e9ecef; color: #495057; }
+    .status-safe { background-color: #d1e7dd; color: #0f5132; }
+    .status-phishing { background-color: #f8d7da; color: #842029; }
+    
+    .metrics-header {
+      text-align: left;
+      font-size: 0.9rem;
+      font-weight: 600;
+      margin: 12px 0 8px 0;
+      color: #6c757d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .metric-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      border-bottom: 1px solid #eee;
+      font-size: 0.9rem;
+    }
+    .metric-row:last-child { border-bottom: none; }
+    .metric-value { font-weight: 600; color: #212529; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div id="statusBanner" class="status-banner status-loading">Analyzing Page...</div>
+    
+    <div class="metrics-header">Extracted Matrix Metrics</div>
+    <div id="metricsContainer">
+      <div class="metric-row">
+        <span>URL Length:</span>
+        <span id="metricUrlLength" class="metric-value">-</span>
+      </div>
+      <div class="metric-row">
+        <span>Dot Count:</span>
+        <span id="metricDotCount" class="metric-value">-</span>
+      </div>
+      <div class="metric-row">
+        <span>HTTPS Status:</span>
+        <span id="metricHttps" class="metric-value">-</span>
+      </div>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
