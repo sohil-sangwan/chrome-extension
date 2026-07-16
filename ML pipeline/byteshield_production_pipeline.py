@@ -11,7 +11,7 @@ import tldextract
 # =====================================================================
 def fetch_phishtank_samples():
     """Fetches real-time malicious targets using PhishTank's open data archives"""
-    print("[*] Ingesting live threat vectors from PhishTank public archives...")
+    print("[*] Ingesting live threat vectors from PhishTank public archives....")
     url = "http://data.phishtank.com/data/online-valid.csv"
     headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
     
