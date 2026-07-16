@@ -101,8 +101,28 @@ async function runInferenceChain(url, features) {
     }
 
     // ====================================================================
-    // ROBUST FALLBACK BOUNDARY
-    // Executed immediately if ort.js is blocked, uncompiled, or fails to resolve
+    // HIGH-PRECISION CRITICAL RE-VALIDATION (Prevents False Positives)
+    // ====================================================================
+    if (inferenceSuccess && prediction === 1) {
+        const scamWord = features["contains_scam_keyword"] ?? 0;
+        const riskyTld = features["is_risky_tld"] ?? 0;
+        const isHttps = features["is_https"] ?? 1;
+        const dotCount = features["dot_count"] ?? 0;
+        const entropy = features["domain_entropy"] ?? 0;
+
+        // Even if the ML model predicted "Phishing (1)", overrule it back to "Safe (0)" if:
+        // - There are NO explicit scam keywords detected in the path/URL
+        // - It does NOT use a high-abuse TLD (like .tk, .top, .xyz)
+        // - The protocol is secure (HTTPS)
+        // - The URL is not structurally bloated (less than 4 dots, moderate domain entropy)
+        if (scamWord === 0 && riskyTld === 0 && isHttps === 1 && dotCount <= 3 && entropy < 4.2) {
+            prediction = 0;
+            console.log("[🛡️ Precision Override] Overruled positive phishing prediction. Site declared SAFE.");
+        }
+    }
+
+    // ====================================================================
+    // CONSERVATIVE FALLBACK BOUNDARY (Triggered if ONNX initialization fails)
     // ====================================================================
     if (!inferenceSuccess) {
         const scamWord = features["contains_scam_keyword"] ?? 0;
@@ -111,12 +131,15 @@ async function runInferenceChain(url, features) {
         const dotCount = features["dot_count"] ?? 0;
         const isHttps = features["is_https"] ?? 1;
 
-        // CRUCIAL FIX: Default to safe unless explicit scam keyword/risky TLD metrics match, 
-        // preventing safe medium-length domains (like sarkariresult) from triggering blocks.
-        if (scamWord === 1 || riskyTld === 1 || dotCount > 4 || urlLen > 75) {
-            prediction = 1; // Classify as Phishing
+        // Fallback to phishing ONLY under very high confidence warning signs:
+        if ((scamWord === 1 || riskyTld === 1) && isHttps === 0) {
+            prediction = 1;
+        } else if (scamWord === 1 && dotCount > 3) {
+            prediction = 1; // Subdomain scam-keyword trickery
+        } else if (dotCount > 4 || urlLen > 110) {
+            prediction = 1; // Extremely malicious/abusive URL nesting
         } else {
-            prediction = 0; // Classify as Safe
+            prediction = 0; // Fail-Open: Default to safe to preserve browsing flow
         }
     }
 
