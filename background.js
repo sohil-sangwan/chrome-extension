@@ -73,6 +73,9 @@ const predictionCache = {};
 // Temporary session-level bypass registry (Holds URLs where user clicked "Proceed Anyway")
 const bypassedUrls = new Set();
 
+// Deduplication tracker to prevent redundant parallel loops on slow connections
+const activeEvaluations = new Map();
+
 // Helper to store predictions in cache so popup.js can fetch them
 function storePredictionResult(tabId, predictionVerdict, featureMetrics) {
     predictionCache[tabId] = {
@@ -118,6 +121,12 @@ function isDomainWhitelisted(url) {
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     // Only execute when the tab starts loading a standard web address
     if (changeInfo.status === 'loading' && tab.url && tab.url.startsWith('http')) {
+        
+        // DEDUPLICATION GATEWAY: Prevent parallel evaluations on slow loading connections
+        if (activeEvaluations.get(tabId) === tab.url) {
+            return;
+        }
+        activeEvaluations.set(tabId, tab.url);
         
         // 1. Check if user bypass is active for this URL
         if (bypassedUrls.has(tab.url)) {
@@ -206,5 +215,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 chrome.tabs.onRemoved.addListener((tabId) => {
     if (predictionCache[tabId]) {
         delete predictionCache[tabId];
+    }
+    if (activeEvaluations.has(tabId)) {
+        activeEvaluations.delete(tabId);
     }
 });
