@@ -4,7 +4,7 @@ let creatingOffscreen = null;
 // Global memory cache storing prediction outputs mapped to active browser tabs
 const predictionCache = {};
 
-// High-Authority Local Whitelist to prevent false-positives on safe domains
+// High-Authority Local Whitelist to prevent false-positives on highly reputable domains
 const SAFE_WHITELIST = [
     "google.com",
     "sarkariresult.com",
@@ -13,12 +13,17 @@ const SAFE_WHITELIST = [
     "microsoft.com",
     "apple.com",
     "amazon.com",
+    "amazon.in",
     "youtube.com",
     "facebook.com",
     "twitter.com",
     "linkedin.com",
     "yahoo.com",
-    "netflix.com"
+    "netflix.com",
+    "instagram.com",
+    "stackoverflow.com",
+    "localhost",
+    "127.0.0.1"
 ];
 
 // Checks if a URL belongs to a high-authority whitelisted domain
@@ -26,7 +31,10 @@ function isWhitelisted(urlStr) {
     try {
         const parsed = new URL(urlStr);
         const hostname = parsed.hostname.toLowerCase();
+        // Strip leading www. if present
         const cleanHost = hostname.startsWith("www.") ? hostname.substring(4) : hostname;
+        
+        // Exact match or subdomain match (e.g., translate.google.com matches google.com)
         return SAFE_WHITELIST.some(domain => cleanHost === domain || cleanHost.endsWith("." + domain));
     } catch {
         return false;
@@ -143,7 +151,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
 
         console.log(`[*] Running real-time evaluation loop for: ${tab.url}`);
 
-        // OPTIMIZATION: Instantly whitelist safe authority domains without executing model analysis
+        // OPTIMIZATION: Instantly bypass checking if the host is whitelisted
         if (isWhitelisted(tab.url)) {
             console.log(`[✅] High-Authority whitelist hit. Instantly whitelisting: ${tab.url}`);
             const defaultMetrics = {
