@@ -94,7 +94,7 @@ if __name__ == "__main__":
     print(f"[*] Combined Dataset Matrix Shape: {master_df.shape}")
     
     # 3. Run feature extractor file logic
-    print("[*] Running extract_features across combined rows...")
+    print("[*] Running extract_features across combined rows....")
     feature_matrices = [extract_features(u) for u in master_df['url']]
     features_df = pd.DataFrame(feature_matrices)
     
