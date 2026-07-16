@@ -1,77 +1,18 @@
-// Lock promise to prevent concurrent offscreen document creation race conditions
-let creatingOffscreen = null;
-
-// Global memory cache storing prediction outputs mapped to active browser tabs
-const predictionCache = {};
-
-// High-Authority Local Whitelist to prevent false-positives on highly reputable domains
-const SAFE_WHITELIST = [
-    "google.com",
-    "sarkariresult.com",
-    "wikipedia.org",
-    "github.com",
-    "microsoft.com",
-    "apple.com",
-    "amazon.com",
-    "amazon.in",
-    "youtube.com",
-    "facebook.com",
-    "twitter.com",
-    "linkedin.com",
-    "yahoo.com",
-    "netflix.com",
-    "instagram.com",
-    "stackoverflow.com",
-    "localhost",
-    "127.0.0.1"
-];
-
-// Checks if a URL belongs to a high-authority whitelisted domain
-function isWhitelisted(urlStr) {
-    try {
-        const parsed = new URL(urlStr);
-        const hostname = parsed.hostname.toLowerCase();
-        // Strip leading www. if present
-        const cleanHost = hostname.startsWith("www.") ? hostname.substring(4) : hostname;
-        
-        // Exact match or subdomain match (e.g., translate.google.com matches google.com)
-        return SAFE_WHITELIST.some(domain => cleanHost === domain || cleanHost.endsWith("." + domain));
-    } catch {
-        return false;
-    }
-}
-
 // Function to safely create or find the hidden AI window context
 async function setupOffscreenEngine() {
-    if (creatingOffscreen) {
-        await creatingOffscreen;
-        return;
-    }
+    const existingContexts = await chrome.runtime.getContexts({
+        contextTypes: ['OFFSCREEN_DOCUMENT']
+    });
 
-    try {
-        const existingContexts = await chrome.runtime.getContexts({
-            contextTypes: ['OFFSCREEN_DOCUMENT']
-        });
+    if (existingContexts.length > 0) return;
 
-        if (existingContexts.length > 0) return;
-
-        creatingOffscreen = chrome.offscreen.createDocument({
-            url: 'offscreen.html',
-            reasons: ['WORKERS'], // Informs Chrome we are compiling worker matrices
-            justification: 'Executing local ONNX machine learning model inference.'
-        });
-
-        await creatingOffscreen;
-        console.log("[+] Secure Offscreen AI Engine Room Initialized.");
-    } catch (err) {
-        if (err.message && err.message.includes("Only a single offscreen document")) {
-            console.log("[*] Offscreen document already initialized concurrently.");
-        } else {
-            console.error("[-] Offscreen document creation failed:", err);
-        }
-    } finally {
-        creatingOffscreen = null;
-    }
+    // Open our hidden HTML math engine room natively
+    await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['WORKERS'], // Informs Chrome we are handling worker matrices
+        justification: 'Executing local ONNX machine learning model inference.'
+    });
+    console.log("[+] Secure Offscreen AI Engine Room Initialized.");
 }
 
 // =====================================================================
@@ -126,52 +67,85 @@ function extractFeatures(url) {
     return features;
 }
 
+// Memory cache holding prediction data for active browsing channels
+const predictionCache = {};
+
+// Temporary session-level bypass registry (Holds URLs where user clicked "Proceed Anyway")
+const bypassedUrls = new Set();
+
+// Helper to store predictions in cache so popup.js can fetch them
 function storePredictionResult(tabId, predictionVerdict, featureMetrics) {
     predictionCache[tabId] = {
         prediction: predictionVerdict, // 0 = Safe, 1 = Phishing
         metrics: featureMetrics,       // { urlLength, dotCount, isHttps }
         timestamp: Date.now()
     };
-    console.log(`[+] Prediction Cached for tab ${tabId}:`, predictionCache[tabId]);
+    console.log(`[+] Cached prediction for tab ${tabId}:`, predictionCache[tabId]);
 }
 
+// Redirects a suspicious navigation to our local safety block page
 function handlePhishingVerdict(tabId, maliciousUrl) {
     const warningPageUrl = chrome.runtime.getURL(`warning.html`) + `?url=${encodeURIComponent(maliciousUrl)}`;
     chrome.tabs.update(tabId, { url: warningPageUrl });
     console.log(`[⚠️] Intercepted phishing navigation on tab ${tabId}. Redirecting to safety screen.`);
 }
 
+// Highly precise authority domains that NEVER get evaluated (Bypass to prevent False Positives)
+const TRUSTED_AUTHORITY_DOMAINS = [
+    "google.com", "google.co.in", "youtube.com", "github.com", "wikipedia.org",
+    "microsoft.com", "apple.com", "amazon.com", "amazon.in", "netflix.com",
+    "facebook.com", "instagram.com", "linkedin.com", "twitter.com", "x.com",
+    "sarkariresult.com", "www.sarkariresult.com", "stackoverflow.com",
+    "gmail.com", "outlook.com", "yahoo.com", "localhost", "127.0.0.1",
+    "chrome", "chrome-extension"
+];
+
+function isDomainWhitelisted(url) {
+    try {
+        const domain = extractDomainName(url).toLowerCase();
+        // Exact match or matches a subdomain of a trusted authority
+        return TRUSTED_AUTHORITY_DOMAINS.some(trusted => 
+            domain === trusted || domain.endsWith("." + trusted)
+        );
+    } catch {
+        return false;
+    }
+}
+
+// =====================================================================
+// REAL-TIME TRAFFIC ROUTING LOOP
+// =====================================================================
 chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     // Only execute when the tab starts loading a standard web address
     if (changeInfo.status === 'loading' && tab.url && tab.url.startsWith('http')) {
+        
+        // 1. Check if user bypass is active for this URL
+        if (bypassedUrls.has(tab.url)) {
+            console.log(`[🛡️ Bypass Active] User elected to proceed to: ${tab.url}`);
+            storePredictionResult(tabId, 0, { urlLength: tab.url.length, dotCount: 0, isHttps: true });
+            return;
+        }
+
+        // 2. Check if the domain resides in our verified authority list
+        if (isDomainWhitelisted(tab.url)) {
+            console.log(`[✓ Whitelisted Domain] Bypassing evaluation for safe host: ${tab.url}`);
+            storePredictionResult(tabId, 0, { urlLength: tab.url.length, dotCount: 0, isHttps: true });
+            return;
+        }
+
         // Avoid intercepting our own warning page to prevent infinite redirects
         if (tab.url.includes(chrome.runtime.id) && tab.url.includes('warning.html')) {
             return;
         }
 
-        console.log(`[*] Running real-time evaluation loop for: ${tab.url}`);
-
-        // OPTIMIZATION: Instantly bypass checking if the host is whitelisted
-        if (isWhitelisted(tab.url)) {
-            console.log(`[✅] High-Authority whitelist hit. Instantly whitelisting: ${tab.url}`);
-            const defaultMetrics = {
-                urlLength: tab.url.length,
-                dotCount: (tab.url.match(/\./g) || []).length,
-                isHttps: tab.url.startsWith('https://')
-            };
-            storePredictionResult(tabId, 0, defaultMetrics);
-            return;
-        }
-
         try {
-            // 1. Ensure the Offscreen DOM Document is awake and initialized safely
+            // 3. Ensure the Offscreen DOM Document is awake and initialized
             await setupOffscreenEngine();
 
-            // 2. Extract Javascript features from the current URL
+            // 4. Extract Javascript features from the current URL
             const extractedFeatures = extractFeatures(tab.url);
-            console.log(`[*] Calculated Matrix: [Keywords: ${extractedFeatures.contains_scam_keyword}, Entropy: ${extractedFeatures.domain_entropy}, Dots: ${extractedFeatures.dot_count}, HTTPS: ${extractedFeatures.is_https}, RiskyTLD: ${extractedFeatures.is_risky_tld}, Len: ${extractedFeatures.url_length}]`);
 
-            // 3. Dispatch the payload to the offscreen worker for execution
+            // 5. Dispatch the payload to the offscreen worker for execution
             chrome.runtime.sendMessage({
                 action: "RUN_INFERENCE",
                 payload: {
@@ -180,7 +154,7 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
                 }
             }, (response) => {
                 if (chrome.runtime.lastError) {
-                    console.error("[-] Message sending failed or timed out:", chrome.runtime.lastError);
+                    console.error("[-] Message sending failed:", chrome.runtime.lastError);
                     return;
                 }
                 
@@ -188,15 +162,16 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
                     const { prediction, metrics } = response;
                     
                     console.log(`[+] Prediction Output Score: ${prediction}`);
-                    console.log(`[+] ByteShield Status: ${prediction === 1 ? "⚠️ PHISHING/UNSAFE" : "✅ SAFE"}`);
+                    console.log(`[+] ByteShield Status: ${prediction === 1 ? "⚠️ PHISHING" : "✅ SAFE"}`);
                     
                     storePredictionResult(tabId, prediction, metrics);
                     
+                    // Active Intercept Safety Block
                     if (prediction === 1) {
                         handlePhishingVerdict(tabId, tab.url);
                     }
                 } else {
-                    console.error("[-] Offscreen engine returned an invalid/failed response schema:", response);
+                    console.error("[-] Offscreen engine returned an invalid response schema.");
                 }
             });
 
@@ -206,14 +181,28 @@ chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
     }
 });
 
+// Global Manifest V3 runtime message router for Popups and Warning page handshakes
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     if (message.action === "GET_LATEST_PREDICTION") {
         const data = predictionCache[message.tabId] || null;
         sendResponse({ data: data });
     }
-    return true; 
+    
+    // EXCEPTION REGISTRATION GATEWAY:
+    // Allows warning.html to temporarily declare a bypass pattern
+    if (message.action === "ADD_BYPASS") {
+        if (message.url) {
+            bypassedUrls.add(message.url);
+            console.log(`[+] Registered secure exception route for URL: ${message.url}`);
+            sendResponse({ status: "success" });
+        } else {
+            sendResponse({ status: "error", message: "Empty URL parameter" });
+        }
+    }
+    return true; // Keep message channel open for async handlers
 });
 
+// Clean up tab memory allocations when a user closes a browsing container
 chrome.tabs.onRemoved.addListener((tabId) => {
     if (predictionCache[tabId]) {
         delete predictionCache[tabId];
